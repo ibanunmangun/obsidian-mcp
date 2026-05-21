@@ -37,6 +37,7 @@ async def ctx(tmp_path: Path):
         base_url="http://127.0.0.1:27123",
         log_level="INFO",
         read_only=False,
+        allow_move=False,
     )
     client = ObsidianClient(config)
     locks = LockRegistry()
@@ -55,6 +56,7 @@ async def read_only_ctx(tmp_path: Path):
         base_url="http://127.0.0.1:27123",
         log_level="INFO",
         read_only=True,
+        allow_move=False,
     )
     client = ObsidianClient(config)
     locks = LockRegistry()

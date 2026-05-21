@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 from obsidian_mcp_opencode import config as config_module
-from obsidian_mcp_opencode.config import DEFAULT_BASE_URL, load_config
+from obsidian_mcp_opencode.config import DEFAULT_BASE_URL, Config, load_config
 from obsidian_mcp_opencode.errors import ConfigError
 
 TEST_API_KEY = "test-token-abcdefghijklmnopqrstuvwxyz-1234567890"
@@ -114,6 +114,7 @@ def test_valid_config_loads_successfully(monkeypatch: pytest.MonkeyPatch, tmp_pa
     assert config.base_url == DEFAULT_BASE_URL
     assert config.log_level == "INFO"
     assert config.read_only is False
+    assert config.allow_move is False
 
 
 def test_env_file_argument_takes_precedence(
@@ -134,6 +135,43 @@ def test_env_file_argument_takes_precedence(
     assert config.base_url == "http://localhost:9999"
     assert config.log_level == "DEBUG"
     assert config.read_only is True
+
+
+def test_config_allow_move_field_defaults_to_false(tmp_path: Path) -> None:
+    config = Config(
+        vault_path=tmp_path,
+        api_key=TEST_API_KEY,
+        base_url=DEFAULT_BASE_URL,
+        log_level="INFO",
+        read_only=False,
+        allow_move=False,
+    )
+
+    assert config.allow_move is False
+
+
+def test_load_config_propagates_allow_move_true(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setenv("OBSIDIAN_VAULT_PATH", str(tmp_path))
+    monkeypatch.setenv("OBSIDIAN_API_KEY", TEST_API_KEY)
+
+    config = load_config(allow_move=True)
+
+    assert config.allow_move is True
+
+
+def test_load_config_defaults_allow_move_to_false(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setenv("OBSIDIAN_VAULT_PATH", str(tmp_path))
+    monkeypatch.setenv("OBSIDIAN_API_KEY", TEST_API_KEY)
+
+    config = load_config()
+
+    assert config.allow_move is False
 
 
 def test_api_key_never_appears_in_logs(

@@ -22,6 +22,7 @@ class ErrorCode:
     MISTAKE_LOG_NOT_FOUND = "mistake_log_not_found"
     APPEND_VERIFICATION_FAILED = "append_verification_failed"
     WRITE_VERIFICATION_FAILED = "write_verification_failed"
+    MOVE_PARTIAL = "move_partial"
     READ_ONLY_MODE_ENABLED = "read_only_mode_enabled"
     API_UNREACHABLE = "api_unreachable"
     API_UNAUTHORIZED = "api_unauthorized"

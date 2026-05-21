@@ -12,17 +12,36 @@ from dotenv import dotenv_values
 from .errors import ConfigError
 
 WRITE_PATTERNS: Final[list[str]] = [
+    # Generic project docs
     "Projects/{slug}/PROJECT.md",
     "Projects/{slug}/LOGS.md",
     "Projects/{slug}/SUMMARY.md",
+    "Projects/{slug}/LESSONS.md",
+    "Projects/{slug}/LESSONS_ARCHIVE.md",
+    "Projects/{slug}/BUILD_LOG.md",
     "Projects/{slug}/PRD.md",
     "Projects/{slug}/PREMORTEM.md",
-    "Projects/{slug}/PREMORTEM-{feature_slug}.md",
     "Projects/{slug}/DESIGN.md",
     "Projects/{slug}/RESEARCH.md",
     "Projects/{slug}/TASKS.md",
+    "Projects/{slug}/REVIEW.md",
+    "Projects/{slug}/SECURITY.md",
+    "Projects/{slug}/DEVILS-ADVOCATE.md",
+    # Feature-suffixed variants
+    "Projects/{slug}/PRD-{feature_slug}.md",
+    "Projects/{slug}/PREMORTEM-{feature_slug}.md",
+    "Projects/{slug}/DESIGN-{feature_slug}.md",
+    "Projects/{slug}/RESEARCH-{feature_slug}.md",
+    "Projects/{slug}/TASKS-{feature_slug}.md",
+    "Projects/{slug}/REVIEW-{feature_slug}.md",
+    "Projects/{slug}/SECURITY-{feature_slug}.md",
+    "Projects/{slug}/SUMMARY-{feature_slug}.md",
+    "Projects/{slug}/DEVILS-ADVOCATE-{feature_slug}.md",
+    # Free-form docs subfolder
     "Projects/{slug}/docs/*.md",
+    # Cross-project memory
     "Projects/PIPELINE_INDEX.md",
+    # Vault root
     "Freya - Mistake Log.md",
     "LOGS.md",
 ]
@@ -31,6 +50,7 @@ APPEND_ONLY_PATTERNS: Final[list[str]] = [
     "Freya - Mistake Log.md",
     "LOGS.md",
     "Projects/*/LOGS.md",
+    "Projects/*/BUILD_LOG.md",
 ]
 
 PROTECTED_MEMORY_PATHS: Final[list[str]] = [
@@ -73,6 +93,7 @@ class Config:
     base_url: str
     log_level: str
     read_only: bool
+    allow_move: bool
 
 
 def _load_env_values(env_file: Path | None) -> dict[str, str]:
@@ -138,7 +159,12 @@ def _validate_base_url(base_url: str | None) -> str:
     return candidate.rstrip("/")
 
 
-def load_config(*, env_file: Path | None = None, read_only: bool = False) -> Config:
+def load_config(
+    *,
+    env_file: Path | None = None,
+    read_only: bool = False,
+    allow_move: bool = False,
+) -> Config:
     """Load and validate runtime configuration."""
 
     values = _load_env_values(env_file)
@@ -153,4 +179,5 @@ def load_config(*, env_file: Path | None = None, read_only: bool = False) -> Con
         base_url=base_url,
         log_level=log_level,
         read_only=READ_ONLY_MODE or read_only,
+        allow_move=allow_move,
     )

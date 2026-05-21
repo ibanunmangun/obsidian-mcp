@@ -27,6 +27,14 @@ def _build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Path to .env file. Overrides default search order.",
     )
+    parser.add_argument(
+        "--allow-move",
+        action="store_true",
+        help=(
+            "Enable the move_note tool. Off by default — when off, move_note is "
+            "not registered with the MCP server and the LLM cannot see or call it."
+        ),
+    )
     return parser
 
 
@@ -41,7 +49,11 @@ def main() -> None:
     )
 
     try:
-        config = load_config(env_file=args.env_file, read_only=args.read_only)
+        config = load_config(
+            env_file=args.env_file,
+            read_only=args.read_only,
+            allow_move=args.allow_move,
+        )
     except ConfigError as exc:
         print(f"obsidian-mcp-opencode: configuration error: {exc.message}", file=sys.stderr)
         sys.exit(1)
@@ -49,10 +61,11 @@ def main() -> None:
     logging.getLogger().setLevel(config.log_level)
 
     logging.getLogger(__name__).info(
-        "Starting MCP server (vault=%s, base_url=%s, read_only=%s)",
+        "Starting MCP server (vault=%s, base_url=%s, read_only=%s, allow_move=%s)",
         config.vault_path,
         config.base_url,
         config.read_only,
+        config.allow_move,
     )
 
     try:

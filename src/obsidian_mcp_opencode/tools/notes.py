@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -20,11 +21,19 @@ from ..errors import (
     cap_path_echo,
     error_envelope,
     from_exception,
+    redact_token,
     success_envelope,
 )
 from ..locks import LockRegistry
 from ..obsidian_client import ObsidianClient
-from ..safety import assert_writable, is_append_only, is_mistake_log, validate_vault_path
+from ..safety import (
+    assert_writable,
+    is_append_only,
+    is_mistake_log,
+    is_protected_memory,
+    match_write_pattern,
+    validate_vault_path,
+)
 
 LOGGER = logging.getLogger(__name__)
 MAX_LIST_RECURSION_DEPTH = 8
@@ -43,6 +52,15 @@ def _internal_error(operation: str) -> dict[str, Any]:
         f"{operation} failed unexpectedly",
         {"operation": operation},
     )
+
+
+def _redacted_exception_envelope(config: Config, exc: MCPError) -> dict[str, Any]:
+    message = redact_token(exc.message, config.api_key)
+    details = {
+        key: redact_token(str(value), config.api_key) if isinstance(value, str) else value
+        for key, value in exc.details.items()
+    }
+    return error_envelope(exc.code, message, details)
 
 
 def _ensure_writes_enabled(config: Config) -> None:
@@ -68,6 +86,12 @@ def _size_from_metadata(content: str, metadata: dict[str, Any]) -> int:
     if isinstance(size, int):
         return size
     return len(content.encode("utf-8"))
+
+
+def _canonical_relative_path(config: Config, candidate: str) -> tuple[Path, str]:
+    resolved_path = validate_vault_path(config.vault_path, candidate)
+    canonical_path = str(resolved_path.relative_to(config.vault_path)).replace(os.sep, "/")
+    return resolved_path, canonical_path
 
 
 def _normalize_listing_path(path: str, entry_type: str) -> str:
@@ -338,3 +362,207 @@ async def search_vault(
         return from_exception(exc)
     except Exception:
         return _internal_error("search_vault")
+
+
+async def move_note(  # noqa: PLR0911, PLR0912
+    ctx: ToolContext, *, source_path: str, destination_path: str
+) -> dict[str, Any]:
+    try:
+        _ensure_writes_enabled(ctx.config)
+
+        _, canonical_source = _canonical_relative_path(ctx.config, source_path)
+        destination_resolved, canonical_destination = _canonical_relative_path(
+            ctx.config, destination_path
+        )
+
+        if canonical_source == canonical_destination:
+            raise MCPError(
+                ErrorCode.VALIDATION_ERROR,
+                "Source and destination must differ",
+                {
+                    "reason": "source_and_destination_identical",
+                    "input_path": cap_path_echo(canonical_source, PATH_ECHO_MAX_CHARS),
+                },
+            )
+
+        if is_mistake_log(canonical_source):
+            raise MCPError(
+                ErrorCode.PATH_FORBIDDEN_USE_SPECIALIZED_TOOL,
+                "Use the specialized mistake log tool for this path",
+                {"input_path": cap_path_echo(canonical_source, PATH_ECHO_MAX_CHARS)},
+            )
+        if is_append_only(canonical_source):
+            raise MCPError(
+                ErrorCode.PATH_FORBIDDEN_APPEND_ONLY,
+                "Append-only files cannot be moved",
+                {"input_path": cap_path_echo(canonical_source, PATH_ECHO_MAX_CHARS)},
+            )
+        if is_protected_memory(canonical_source):
+            raise MCPError(
+                ErrorCode.PATH_FORBIDDEN,
+                "Protected memory files cannot be moved",
+                {"input_path": cap_path_echo(canonical_source, PATH_ECHO_MAX_CHARS)},
+            )
+
+        if not match_write_pattern(canonical_destination):
+            raise MCPError(
+                ErrorCode.PATH_FORBIDDEN,
+                "Path is not on the write allowlist",
+                {"input_path": cap_path_echo(canonical_destination, PATH_ECHO_MAX_CHARS)},
+            )
+        if is_mistake_log(canonical_destination):
+            raise MCPError(
+                ErrorCode.PATH_FORBIDDEN_USE_SPECIALIZED_TOOL,
+                "Use the specialized mistake log tool for this path",
+                {"input_path": cap_path_echo(canonical_destination, PATH_ECHO_MAX_CHARS)},
+            )
+        if is_append_only(canonical_destination):
+            raise MCPError(
+                ErrorCode.PATH_FORBIDDEN_APPEND_ONLY,
+                "Append-only files cannot be moved",
+                {"input_path": cap_path_echo(canonical_destination, PATH_ECHO_MAX_CHARS)},
+            )
+        _ensure_parent_directory_exists(destination_resolved, canonical_destination)
+
+        destination_stat = await ctx.client.stat(canonical_destination)
+        if destination_stat.get("exists"):
+            raise MCPError(
+                ErrorCode.FILE_EXISTS,
+                "Destination file already exists",
+                {"input_path": cap_path_echo(canonical_destination, PATH_ECHO_MAX_CHARS)},
+            )
+
+        source_stat = await ctx.client.stat(canonical_source)
+        if not source_stat.get("exists"):
+            raise MCPError(
+                ErrorCode.PATH_NOT_FOUND,
+                "Vault path not found",
+                {"input_path": cap_path_echo(canonical_source, PATH_ECHO_MAX_CHARS)},
+            )
+
+        ordered_paths = sorted({canonical_source, canonical_destination})
+        async with ctx.locks.lock_for(ordered_paths[0]):
+            async with ctx.locks.lock_for(ordered_paths[1]):
+                source_stat = await ctx.client.stat(canonical_source)
+                if not source_stat.get("exists"):
+                    return error_envelope(
+                        ErrorCode.PATH_NOT_FOUND,
+                        "Vault path not found",
+                        {"input_path": cap_path_echo(canonical_source, PATH_ECHO_MAX_CHARS)},
+                    )
+
+                destination_stat = await ctx.client.stat(canonical_destination)
+                if destination_stat.get("exists"):
+                    return error_envelope(
+                        ErrorCode.FILE_EXISTS,
+                        "Destination file already exists",
+                        {"input_path": cap_path_echo(canonical_destination, PATH_ECHO_MAX_CHARS)},
+                    )
+
+                content, _ = await ctx.client.get_file(canonical_source)
+                await ctx.client.put_file(canonical_destination, content)
+
+                try:
+                    written_content, _ = await ctx.client.get_file(canonical_destination)
+                except MCPError as exc:
+                    raise MCPError(
+                        ErrorCode.WRITE_VERIFICATION_FAILED,
+                        "Destination read-back failed",
+                        {
+                            "source": cap_path_echo(canonical_source, PATH_ECHO_MAX_CHARS),
+                            "destination": cap_path_echo(
+                                canonical_destination,
+                                PATH_ECHO_MAX_CHARS,
+                            ),
+                            "underlying_error": exc.code,
+                        },
+                    ) from exc
+
+                if written_content != content:
+                    raise MCPError(
+                        ErrorCode.WRITE_VERIFICATION_FAILED,
+                        "Destination content does not match source",
+                        {
+                            "source": cap_path_echo(canonical_source, PATH_ECHO_MAX_CHARS),
+                            "destination": cap_path_echo(
+                                canonical_destination,
+                                PATH_ECHO_MAX_CHARS,
+                            ),
+                            "expected_size": len(content),
+                            "actual_size": len(written_content),
+                        },
+                    )
+
+                try:
+                    await ctx.client.delete_file(canonical_source)
+                except MCPError as exc:
+                    return error_envelope(
+                        ErrorCode.MOVE_PARTIAL,
+                        "Move partially completed: destination created but source deletion failed",
+                        {
+                            "stage": "delete_source",
+                            "source": cap_path_echo(canonical_source, PATH_ECHO_MAX_CHARS),
+                            "destination": cap_path_echo(
+                                canonical_destination,
+                                PATH_ECHO_MAX_CHARS,
+                            ),
+                            "destination_created": True,
+                            "destination_exists_after_write": True,
+                            "source_delete_attempted": True,
+                            "source_exists_after_delete": True,
+                            "manual_cleanup_required": True,
+                            "underlying_error": exc.code,
+                        },
+                    )
+
+                try:
+                    after_stat = await ctx.client.stat(canonical_source)
+                except MCPError:
+                    return error_envelope(
+                        ErrorCode.MOVE_PARTIAL,
+                        "Move partially completed: cannot verify source deletion",
+                        {
+                            "stage": "verify_source_deleted",
+                            "source": cap_path_echo(canonical_source, PATH_ECHO_MAX_CHARS),
+                            "destination": cap_path_echo(
+                                canonical_destination,
+                                PATH_ECHO_MAX_CHARS,
+                            ),
+                            "destination_created": True,
+                            "destination_exists_after_write": True,
+                            "source_delete_attempted": True,
+                            "source_exists_after_delete": "unknown",
+                            "manual_cleanup_required": True,
+                        },
+                    )
+
+                if after_stat.get("exists"):
+                    return error_envelope(
+                        ErrorCode.MOVE_PARTIAL,
+                        "Move partially completed: source still exists after delete",
+                        {
+                            "stage": "verify_source_deleted",
+                            "source": cap_path_echo(canonical_source, PATH_ECHO_MAX_CHARS),
+                            "destination": cap_path_echo(
+                                canonical_destination,
+                                PATH_ECHO_MAX_CHARS,
+                            ),
+                            "destination_created": True,
+                            "destination_exists_after_write": True,
+                            "source_delete_attempted": True,
+                            "source_exists_after_delete": True,
+                            "manual_cleanup_required": True,
+                        },
+                    )
+
+        return success_envelope(
+            {
+                "moved": True,
+                "source": canonical_source,
+                "destination": canonical_destination,
+            }
+        )
+    except MCPError as exc:
+        return _redacted_exception_envelope(ctx.config, exc)
+    except Exception:
+        return _internal_error("move_note")

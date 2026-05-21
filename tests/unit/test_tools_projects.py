@@ -35,6 +35,7 @@ def ctx(tmp_path: Path) -> ToolContext:
         base_url="http://127.0.0.1:27123",
         log_level="INFO",
         read_only=False,
+        allow_move=False,
     )
     client = ObsidianClient(config)
     locks = LockRegistry()
@@ -176,6 +177,7 @@ async def test_bootstrap_project_rejects_read_only(ctx: ToolContext) -> None:
             base_url=ctx.config.base_url,
             log_level=ctx.config.log_level,
             read_only=True,
+            allow_move=False,
         ),
         locks=ctx.locks,
     )

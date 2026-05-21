@@ -98,10 +98,38 @@ class ToolDescriptor:
 TOOL_REGISTRY: list[ToolDescriptor]
 
 
-def build_tool_registry() -> list[ToolDescriptor]:
+def _build_move_note_descriptor() -> ToolDescriptor:
+    return ToolDescriptor(
+        name="move_note",
+        description=(
+            "Move (rename) a note from one vault path to another. Source is deleted only "
+            "after destination is verified to contain identical content. Append-only files "
+            "(mistake log, LOGS.md) cannot be moved."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "source_path": {"type": "string", "description": "Vault-relative source path."},
+                "destination_path": {
+                    "type": "string",
+                    "description": (
+                        "Vault-relative destination path. Parent directory "
+                        "must already exist."
+                    ),
+                },
+            },
+            "required": ["source_path", "destination_path"],
+            "additionalProperties": False,
+        },
+        handler=notes.move_note,
+        is_write=True,
+    )
+
+
+def build_tool_registry(config: Config | None = None) -> list[ToolDescriptor]:
     """Build the static descriptor list. Pure function — no I/O."""
 
-    return [
+    descriptors = [
         ToolDescriptor(
             name="read_note",
             description=TOOL_DESCRIPTIONS["read_note"],
@@ -284,6 +312,9 @@ def build_tool_registry() -> list[ToolDescriptor]:
             is_write=True,
         ),
     ]
+    if config is not None and config.allow_move:
+        descriptors.append(_build_move_note_descriptor())
+    return descriptors
 
 
 TOOL_REGISTRY = build_tool_registry()
@@ -302,6 +333,7 @@ def _context_for_descriptor(
         "append_note",
         "list_notes",
         "search_vault",
+        "move_note",
     }:
         return notes_ctx
     if descriptor.name in {"get_mistake_log", "append_mistake_log"}:
@@ -405,7 +437,7 @@ async def serve_stdio(config: Config) -> None:
     notes_ctx = notes.ToolContext(client=client, config=config, locks=locks)
     mistake_log_ctx = mistake_log.ToolContext(client=client, config=config, locks=locks)
     projects_ctx = projects.ToolContext(client=client, config=config, locks=locks)
-    tool_registry = build_tool_registry()
+    tool_registry = build_tool_registry(config)
     descriptors_by_name = {descriptor.name: descriptor for descriptor in tool_registry}
 
     server = Server("obsidian-mcp-opencode", version=__version__)

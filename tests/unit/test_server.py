@@ -37,6 +37,7 @@ WRITE_TOOL_NAMES = {
     "append_mistake_log",
     "bootstrap_project",
 }
+MOVE_TOOL_NAME = "move_note"
 
 @pytest.fixture
 def config(tmp_path: Path) -> Config:
@@ -46,6 +47,7 @@ def config(tmp_path: Path) -> Config:
         base_url="http://127.0.0.1:27123",
         log_level="INFO",
         read_only=False,
+        allow_move=False,
     )
 
 
@@ -57,6 +59,7 @@ def read_only_config(tmp_path: Path) -> Config:
         base_url="http://127.0.0.1:27123",
         log_level="INFO",
         read_only=True,
+        allow_move=False,
     )
 
 
@@ -80,11 +83,37 @@ EXPECTED_WRITE_TOOL_COUNT = 4
 EXPECTED_READ_TOOL_COUNT = 6
 
 
-def test_build_tool_registry_returns_exactly_ten_descriptors() -> None:
+def _with_allow_move(config: Config, allow_move: bool) -> Config:
+    return Config(
+        vault_path=config.vault_path,
+        api_key=config.api_key,
+        base_url=config.base_url,
+        log_level=config.log_level,
+        read_only=config.read_only,
+        allow_move=allow_move,
+    )
+
+
+def test_build_tool_registry_without_config_returns_exactly_ten_descriptors() -> None:
     registry = build_tool_registry()
 
     assert len(registry) == EXPECTED_TOOL_COUNT
     assert all(isinstance(item, ToolDescriptor) for item in registry)
+
+
+def test_build_tool_registry_allow_move_false_returns_ten_descriptors(config: Config) -> None:
+    registry = build_tool_registry(_with_allow_move(config, False))
+
+    assert len(registry) == EXPECTED_TOOL_COUNT
+    assert all(isinstance(item, ToolDescriptor) for item in registry)
+
+
+def test_build_tool_registry_allow_move_true_returns_eleven_descriptors(config: Config) -> None:
+    registry = build_tool_registry(_with_allow_move(config, True))
+
+    assert len(registry) == EXPECTED_TOOL_COUNT + 1
+    move_descriptor = next(item for item in registry if item.name == MOVE_TOOL_NAME)
+    assert move_descriptor.is_write is True
 
 
 def test_tool_names_are_unique_and_match_canonical_names() -> None:
@@ -104,6 +133,31 @@ def test_write_flag_classification_matches_contract() -> None:
     assert len(write_tools) == EXPECTED_WRITE_TOOL_COUNT
     assert len(read_tools) == EXPECTED_READ_TOOL_COUNT
     assert write_tools.isdisjoint(read_tools)
+
+
+def test_write_flag_classification_includes_move_only_when_enabled(config: Config) -> None:
+    disabled_registry = build_tool_registry(_with_allow_move(config, False))
+    enabled_registry = build_tool_registry(_with_allow_move(config, True))
+
+    disabled_write_tools = {item.name for item in disabled_registry if item.is_write}
+    enabled_write_tools = {item.name for item in enabled_registry if item.is_write}
+
+    assert disabled_write_tools == WRITE_TOOL_NAMES
+    assert enabled_write_tools == WRITE_TOOL_NAMES | {MOVE_TOOL_NAME}
+
+
+def test_no_tool_descriptor_exposes_delete_name(config: Config) -> None:
+    registries = [
+        build_tool_registry(),
+        build_tool_registry(_with_allow_move(config, False)),
+        build_tool_registry(_with_allow_move(config, True)),
+    ]
+
+    for registry in registries:
+        names = {item.name for item in registry}
+        assert "delete_note" not in names
+        assert "delete_file" not in names
+        assert all("delete" not in name for name in names)
 
 
 async def test_dispatch_read_only_config_blocks_write_tool(read_only_config: Config) -> None:

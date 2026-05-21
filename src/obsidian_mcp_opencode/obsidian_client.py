@@ -139,6 +139,21 @@ class ObsidianClient:
             operation="append_file",
         )
 
+    async def delete_file(self, vault_relative_path: str) -> None:
+        """DELETE /vault/{path}.
+
+        INTERNAL DESTRUCTIVE PRIMITIVE. This method is the only delete capability
+        in the package. It MUST NOT be exposed through any MCP tool registration.
+        The only authorized caller in v0.2.0 is `tools.notes.move_note`. Any new
+        caller requires an explicit PRD update.
+        """
+
+        await self._request(
+            "DELETE",
+            self._vault_path_url(vault_relative_path),
+            operation="delete_file",
+        )
+
     async def list_directory(self, vault_relative_path: str) -> list[dict[str, Any]]:
         response = await self._request(
             "GET",

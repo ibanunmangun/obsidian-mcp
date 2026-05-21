@@ -26,6 +26,7 @@ def ctx(tmp_path: Path) -> ToolContext:
         base_url="http://127.0.0.1:27123",
         log_level="INFO",
         read_only=False,
+        allow_move=False,
     )
     client = ObsidianClient(config)
     locks = LockRegistry()
@@ -134,6 +135,7 @@ async def test_append_mistake_log_read_only_returns_error(tmp_path: Path) -> Non
         base_url="http://127.0.0.1:27123",
         log_level="INFO",
         read_only=True,
+        allow_move=False,
     )
     ctx = ToolContext(client=ObsidianClient(config), config=config, locks=LockRegistry())
 

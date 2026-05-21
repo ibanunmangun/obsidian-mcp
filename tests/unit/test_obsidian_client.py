@@ -24,6 +24,7 @@ def config(tmp_path: Path) -> Config:
         base_url="http://127.0.0.1:27123",
         log_level="INFO",
         read_only=False,
+        allow_move=False,
     )
 
 
@@ -114,6 +115,7 @@ async def test_api_key_never_appears_in_caplog(
     [
         ("put_file", ("Projects/foo/PROJECT.md", "body")),
         ("append_file", ("Projects/foo/LOGS.md", "body")),
+        ("delete_file", ("Projects/foo/PROJECT.md",)),
         ("list_directory", ("Projects/foo",)),
         ("search", ("needle",)),
         ("stat", ("Projects/foo/PROJECT.md",)),
@@ -141,6 +143,7 @@ async def test_methods_map_401_to_api_unauthorized(
     [
         ("put_file", ("Projects/foo/PROJECT.md", "body")),
         ("append_file", ("Projects/foo/LOGS.md", "body")),
+        ("delete_file", ("Projects/foo/PROJECT.md",)),
         ("list_directory", ("Projects/foo",)),
         ("search", ("needle",)),
         ("stat", ("Projects/foo/PROJECT.md",)),
@@ -168,6 +171,7 @@ async def test_methods_map_connect_error_to_api_unreachable(
     [
         ("put_file", ("Projects/foo/PROJECT.md", "body")),
         ("append_file", ("Projects/foo/LOGS.md", "body")),
+        ("delete_file", ("Projects/foo/PROJECT.md",)),
         ("list_directory", ("Projects/foo",)),
         ("search", ("needle",)),
         ("stat", ("Projects/foo/PROJECT.md",)),
