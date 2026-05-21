@@ -1,0 +1,170 @@
+# =============================================================================
+# Internal-only files (not for public repo)
+# =============================================================================
+# Internal docs (PRD, premortem, planning, internal walkthrough, etc.)
+# Public-facing README is at the repo root, not in docs/.
+docs/
+
+# Internal session log (project memory). Kept locally and mirrored to vault.
+LOGS.md
+
+# Internal agent rules (may reference personal paths/conventions).
+AGENTS.md
+
+# =============================================================================
+# Secrets & credentials — NEVER commit these
+# =============================================================================
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+*.cert
+*.crt
+*.p12
+*.pfx
+secrets/
+secret/
+private/
+personal/
+credentials/
+*.token
+*.tokens
+api_keys.txt
+api-keys.txt
+*_secret.*
+*_secrets.*
+*_credentials.*
+auth.json
+auth.yml
+auth.yaml
+
+# Local config overrides (may contain personal paths or tokens)
+configs/local.*
+configs/personal.*
+configs/.env
+.envrc
+.direnv/
+
+# =============================================================================
+# Python
+# =============================================================================
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual environments
+.venv
+venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+.python-version
+
+# =============================================================================
+# Testing & coverage
+# =============================================================================
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+.hypothesis/
+
+# Test fixtures with real vault data — never commit
+tests/fixtures/real_*
+tests/fixtures/personal_*
+tests/fixtures/_local/
+
+# =============================================================================
+# Linters / type checkers
+# =============================================================================
+.ruff_cache/
+.mypy_cache/
+.dmypy.json
+dmypy.json
+.pyre/
+.pytype/
+
+# =============================================================================
+# IDE / editor
+# =============================================================================
+.idea/
+.vscode/
+*.swp
+*.swo
+*.swn
+*~
+.project
+.pydevproject
+.settings/
+*.sublime-project
+*.sublime-workspace
+.cursor/
+
+# =============================================================================
+# OS-generated
+# =============================================================================
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+Desktop.ini
+
+# =============================================================================
+# Project-specific
+# =============================================================================
+# Runtime logs (separate from project session log LOGS.md which is committed)
+logs/
+*.log
+
+# Local scratch data
+data/scratch/
+data/local/
+data/_*
+
+# Smoke test artifacts (cleanup is manual since v1 has no delete tool)
+**/_mcp-smoke-test/
+
+# Local notes and drafts not meant to be public
+NOTES.local.md
+TODO.local.md
+*.local.md
+
+# Backups
+*.bak
+*.backup
+*.orig
+*.rej
+
+# Profile / debug dumps
+*.prof
+*.pstats
+*.dump
+core.*
