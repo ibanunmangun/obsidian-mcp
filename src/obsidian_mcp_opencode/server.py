@@ -11,7 +11,7 @@ from mcp.server import InitializationOptions, NotificationOptions, Server
 from mcp.server.stdio import stdio_server
 
 from . import __version__
-from .config import Config
+from .config import WORKFLOW_FREYA, Config
 from .errors import (
     ErrorCode,
     MCPError,
@@ -126,10 +126,8 @@ def _build_move_note_descriptor() -> ToolDescriptor:
     )
 
 
-def build_tool_registry(config: Config | None = None) -> list[ToolDescriptor]:
-    """Build the static descriptor list. Pure function — no I/O."""
-
-    descriptors = [
+def _build_core_descriptors() -> list[ToolDescriptor]:
+    return [
         ToolDescriptor(
             name="read_note",
             description=TOOL_DESCRIPTIONS["read_note"],
@@ -210,6 +208,11 @@ def build_tool_registry(config: Config | None = None) -> list[ToolDescriptor]:
             handler=notes.search_vault,
             is_write=False,
         ),
+    ]
+
+
+def _build_freya_descriptors() -> list[ToolDescriptor]:
+    return [
         ToolDescriptor(
             name="get_mistake_log",
             description=TOOL_DESCRIPTIONS["get_mistake_log"],
@@ -312,6 +315,15 @@ def build_tool_registry(config: Config | None = None) -> list[ToolDescriptor]:
             is_write=True,
         ),
     ]
+
+
+def build_tool_registry(config: Config | None = None) -> list[ToolDescriptor]:
+    """Build tool descriptors. Filters by workflow and feature flags."""
+
+    descriptors = _build_core_descriptors()
+    workflow = config.workflow if config is not None else None
+    if workflow == WORKFLOW_FREYA:
+        descriptors.extend(_build_freya_descriptors())
     if config is not None and config.allow_move:
         descriptors.append(_build_move_note_descriptor())
     return descriptors

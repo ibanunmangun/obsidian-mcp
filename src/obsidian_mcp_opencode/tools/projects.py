@@ -11,6 +11,7 @@ from ..config import (
     MAX_SEARCH_SNIPPET_CHARS,
     PIPELINE_INDEX_PATH,
     RESERVED_SEGMENTS,
+    WORKFLOW_FREYA,
     Config,
 )
 from ..errors import ErrorCode, MCPError, from_exception, success_envelope
@@ -71,6 +72,16 @@ def _snippet_from_hit(hit: dict[str, Any]) -> str:
 
 
 async def get_pipeline_index(ctx: ToolContext) -> dict[str, Any]:
+    if ctx.config.workflow != WORKFLOW_FREYA:
+        return from_exception(
+            MCPError(
+                ErrorCode.VALIDATION_ERROR,
+                "Pipeline index is a Freya-workflow feature. "
+                "Run server with --workflow freya to enable.",
+                {"workflow": ctx.config.workflow},
+            )
+        )
+
     try:
         content, _metadata = await ctx.client.get_file(PIPELINE_INDEX_PATH)
         return success_envelope({"content": content, "exists": True})
@@ -86,6 +97,16 @@ async def search_projects(
     query: str,
     max_results: int = 30,
 ) -> dict[str, Any]:
+    if ctx.config.workflow != WORKFLOW_FREYA:
+        return from_exception(
+            MCPError(
+                ErrorCode.VALIDATION_ERROR,
+                "Project search is a Freya-workflow feature. "
+                "Run server with --workflow freya to enable.",
+                {"workflow": ctx.config.workflow},
+            )
+        )
+
     if not query.strip():
         return from_exception(
             MCPError(ErrorCode.VALIDATION_ERROR, "Query must not be empty")
@@ -143,6 +164,16 @@ async def bootstrap_project(
     slug: str,
     files: dict[str, str] | None = None,
 ) -> dict[str, Any]:
+    if ctx.config.workflow != WORKFLOW_FREYA:
+        return from_exception(
+            MCPError(
+                ErrorCode.VALIDATION_ERROR,
+                "Project bootstrap is a Freya-workflow feature. "
+                "Run server with --workflow freya to enable.",
+                {"workflow": ctx.config.workflow},
+            )
+        )
+
     if ctx.config.read_only:
         return from_exception(
             MCPError(

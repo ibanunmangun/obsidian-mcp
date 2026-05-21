@@ -6,7 +6,13 @@ import logging
 import sys
 from pathlib import Path
 
-from .config import DEFAULT_LOG_LEVEL, load_config
+from .config import (
+    DEFAULT_LOG_LEVEL,
+    DEFAULT_WORKFLOW,
+    WORKFLOW_FREYA,
+    WORKFLOW_GENERIC,
+    load_config,
+)
 from .errors import ConfigError, MCPError
 from .server import serve_stdio
 
@@ -35,6 +41,17 @@ def _build_parser() -> argparse.ArgumentParser:
             "not registered with the MCP server and the LLM cannot see or call it."
         ),
     )
+    parser.add_argument(
+        "--workflow",
+        choices=[WORKFLOW_GENERIC, WORKFLOW_FREYA],
+        default=None,
+        help=(
+            "Workflow mode. Default: "
+            f"{DEFAULT_WORKFLOW} (or value of OBSIDIAN_WORKFLOW env var). "
+            "'freya' enables mistake log, pipeline index, project bootstrap, "
+            "and search_projects tools."
+        ),
+    )
     return parser
 
 
@@ -53,6 +70,7 @@ def main() -> None:
             env_file=args.env_file,
             read_only=args.read_only,
             allow_move=args.allow_move,
+            workflow=args.workflow,
         )
     except ConfigError as exc:
         print(f"obsidian-mcp-opencode: configuration error: {exc.message}", file=sys.stderr)
@@ -61,9 +79,10 @@ def main() -> None:
     logging.getLogger().setLevel(config.log_level)
 
     logging.getLogger(__name__).info(
-        "Starting MCP server (vault=%s, base_url=%s, read_only=%s, allow_move=%s)",
+        "Starting MCP server (vault=%s, base_url=%s, workflow=%s, read_only=%s, allow_move=%s)",
         config.vault_path,
         config.base_url,
+        config.workflow,
         config.read_only,
         config.allow_move,
     )

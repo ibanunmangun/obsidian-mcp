@@ -12,7 +12,9 @@ from ..config import (
     MAX_SEARCH_QUERY_CHARS,
     MAX_SEARCH_RESULTS,
     MAX_SEARCH_SNIPPET_CHARS,
+    MISTAKE_LOG_FILENAME,
     PATH_ECHO_MAX_CHARS,
+    WORKFLOW_FREYA,
     Config,
 )
 from ..errors import (
@@ -101,6 +103,18 @@ def _normalize_listing_path(path: str, entry_type: str) -> str:
     return normalized
 
 
+def _safety_kwargs(config: Config) -> dict[str, Any]:
+    return {
+        "write_patterns": config.write_patterns,
+        "append_only_patterns": config.append_only_patterns,
+        "protected_memory_paths": config.protected_memory_paths,
+        "mistake_log_filename": (
+            MISTAKE_LOG_FILENAME if config.workflow == WORKFLOW_FREYA else None
+        ),
+        "enforce_reserved_segments": config.workflow == WORKFLOW_FREYA,
+    }
+
+
 async def read_note(ctx: ToolContext, *, path: str) -> dict[str, Any]:
     try:
         validate_vault_path(ctx.config.vault_path, path)
@@ -128,7 +142,12 @@ async def write_note(
     try:
         _ensure_writes_enabled(ctx.config)
         resolved_path = validate_vault_path(ctx.config.vault_path, path)
-        assert_writable(path, allow_overwrite=overwrite, is_append=False)
+        assert_writable(
+            path,
+            allow_overwrite=overwrite,
+            is_append=False,
+            **_safety_kwargs(ctx.config),
+        )
         _ensure_parent_directory_exists(resolved_path, path)
 
         stat_before = await ctx.client.stat(path)
@@ -184,16 +203,15 @@ async def append_note(ctx: ToolContext, *, path: str, content: str) -> dict[str,
     try:
         _ensure_writes_enabled(ctx.config)
         resolved_path = validate_vault_path(ctx.config.vault_path, path)
-        if is_mistake_log(path):
-            raise MCPError(
-                ErrorCode.PATH_FORBIDDEN_USE_SPECIALIZED_TOOL,
-                "Use the specialized mistake log tool for this path",
-                {"input_path": cap_path_echo(path, PATH_ECHO_MAX_CHARS)},
-            )
-        assert_writable(path, allow_overwrite=False, is_append=True)
+        assert_writable(
+            path,
+            allow_overwrite=False,
+            is_append=True,
+            **_safety_kwargs(ctx.config),
+        )
         _ensure_parent_directory_exists(resolved_path, path)
 
-        append_only = is_append_only(path)
+        append_only = is_append_only(path, ctx.config.append_only_patterns)
         lock = ctx.locks.lock_for(path) if append_only else None
 
         async def _do_append() -> dict[str, Any]:
@@ -385,38 +403,48 @@ async def move_note(  # noqa: PLR0911, PLR0912
                 },
             )
 
-        if is_mistake_log(canonical_source):
+        if (
+            ctx.config.workflow == WORKFLOW_FREYA
+            and is_mistake_log(canonical_source, MISTAKE_LOG_FILENAME)
+        ):
             raise MCPError(
                 ErrorCode.PATH_FORBIDDEN_USE_SPECIALIZED_TOOL,
                 "Use the specialized mistake log tool for this path",
                 {"input_path": cap_path_echo(canonical_source, PATH_ECHO_MAX_CHARS)},
             )
-        if is_append_only(canonical_source):
+        if is_append_only(canonical_source, ctx.config.append_only_patterns):
             raise MCPError(
                 ErrorCode.PATH_FORBIDDEN_APPEND_ONLY,
                 "Append-only files cannot be moved",
                 {"input_path": cap_path_echo(canonical_source, PATH_ECHO_MAX_CHARS)},
             )
-        if is_protected_memory(canonical_source):
+        if is_protected_memory(canonical_source, ctx.config.protected_memory_paths):
             raise MCPError(
                 ErrorCode.PATH_FORBIDDEN,
                 "Protected memory files cannot be moved",
                 {"input_path": cap_path_echo(canonical_source, PATH_ECHO_MAX_CHARS)},
             )
 
-        if not match_write_pattern(canonical_destination):
+        if not match_write_pattern(
+            canonical_destination,
+            ctx.config.write_patterns,
+            enforce_reserved_segments=ctx.config.workflow == WORKFLOW_FREYA,
+        ):
             raise MCPError(
                 ErrorCode.PATH_FORBIDDEN,
                 "Path is not on the write allowlist",
                 {"input_path": cap_path_echo(canonical_destination, PATH_ECHO_MAX_CHARS)},
             )
-        if is_mistake_log(canonical_destination):
+        if (
+            ctx.config.workflow == WORKFLOW_FREYA
+            and is_mistake_log(canonical_destination, MISTAKE_LOG_FILENAME)
+        ):
             raise MCPError(
                 ErrorCode.PATH_FORBIDDEN_USE_SPECIALIZED_TOOL,
                 "Use the specialized mistake log tool for this path",
                 {"input_path": cap_path_echo(canonical_destination, PATH_ECHO_MAX_CHARS)},
             )
-        if is_append_only(canonical_destination):
+        if is_append_only(canonical_destination, ctx.config.append_only_patterns):
             raise MCPError(
                 ErrorCode.PATH_FORBIDDEN_APPEND_ONLY,
                 "Append-only files cannot be moved",

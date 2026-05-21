@@ -7,7 +7,7 @@ from urllib.parse import quote
 
 import pytest
 
-from obsidian_mcp_opencode.config import MISTAKE_LOG_FILENAME, Config
+from obsidian_mcp_opencode.config import MISTAKE_LOG_FILENAME, WORKFLOW_GENERIC, Config
 from obsidian_mcp_opencode.errors import ErrorCode, MCPError
 from obsidian_mcp_opencode.locks import LockRegistry
 from obsidian_mcp_opencode.obsidian_client import ObsidianClient
@@ -19,18 +19,17 @@ EXPECTED_GOLDEN_ENTRY_COUNT = 3
 
 
 @pytest.fixture
-def ctx(tmp_path: Path) -> ToolContext:
-    config = Config(
-        vault_path=tmp_path,
-        api_key="test-token-XYZ",
-        base_url="http://127.0.0.1:27123",
-        log_level="INFO",
-        read_only=False,
-        allow_move=False,
-    )
-    client = ObsidianClient(config)
+def ctx(freya_config: Config) -> ToolContext:
+    client = ObsidianClient(freya_config)
     locks = LockRegistry()
-    return ToolContext(client=client, config=config, locks=locks)
+    return ToolContext(client=client, config=freya_config, locks=locks)
+
+
+@pytest.fixture
+def generic_ctx(generic_config: Config) -> ToolContext:
+    client = ObsidianClient(generic_config)
+    locks = LockRegistry()
+    return ToolContext(client=client, config=generic_config, locks=locks)
 
 
 @pytest.fixture
@@ -128,14 +127,27 @@ async def test_get_mistake_log_redacts_api_key_from_errors(
 
 
 @pytest.mark.asyncio
-async def test_append_mistake_log_read_only_returns_error(tmp_path: Path) -> None:
+async def test_get_mistake_log_generic_workflow_rejected(generic_ctx: ToolContext) -> None:
+    result = await get_mistake_log(generic_ctx)
+
+    assert result["ok"] is False
+    assert result["error"]["code"] == ErrorCode.VALIDATION_ERROR
+    assert result["error"]["details"]["workflow"] == WORKFLOW_GENERIC
+
+
+@pytest.mark.asyncio
+async def test_append_mistake_log_read_only_returns_error(freya_config: Config) -> None:
     config = Config(
-        vault_path=tmp_path,
-        api_key="test-token-XYZ",
-        base_url="http://127.0.0.1:27123",
-        log_level="INFO",
+        vault_path=freya_config.vault_path,
+        api_key=freya_config.api_key,
+        base_url=freya_config.base_url,
+        log_level=freya_config.log_level,
         read_only=True,
         allow_move=False,
+        workflow=freya_config.workflow,
+        write_patterns=freya_config.write_patterns,
+        append_only_patterns=freya_config.append_only_patterns,
+        protected_memory_paths=freya_config.protected_memory_paths,
     )
     ctx = ToolContext(client=ObsidianClient(config), config=config, locks=LockRegistry())
 
@@ -233,6 +245,23 @@ async def test_append_mistake_log_rejects_header_injection(
 
     assert result["ok"] is False
     assert result["error"]["code"] == ErrorCode.ENTRY_HEADER_INJECTION
+
+
+@pytest.mark.asyncio
+async def test_append_mistake_log_generic_workflow_rejected(generic_ctx: ToolContext) -> None:
+    result = await append_mistake_log(
+        generic_ctx,
+        title="Title",
+        context="Context",
+        mistake="Mistake",
+        root_cause="Cause",
+        fix="Fix",
+        lesson="Lesson",
+    )
+
+    assert result["ok"] is False
+    assert result["error"]["code"] == ErrorCode.VALIDATION_ERROR
+    assert result["error"]["details"]["workflow"] == WORKFLOW_GENERIC
 
 
 @pytest.mark.asyncio

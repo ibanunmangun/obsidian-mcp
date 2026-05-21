@@ -6,7 +6,23 @@ from pathlib import Path
 import pytest
 
 from obsidian_mcp_opencode import config as config_module
-from obsidian_mcp_opencode.config import DEFAULT_BASE_URL, Config, load_config
+from obsidian_mcp_opencode.config import (
+    DEFAULT_BASE_URL,
+    DEFAULT_WORKFLOW,
+    FREYA_APPEND_ONLY_PATTERNS,
+    FREYA_PROTECTED_MEMORY_PATHS,
+    FREYA_WRITE_PATTERNS,
+    GENERIC_APPEND_ONLY_PATTERNS,
+    GENERIC_PROTECTED_MEMORY_PATHS,
+    GENERIC_WRITE_PATTERNS,
+    WORKFLOW_FREYA,
+    WORKFLOW_GENERIC,
+    Config,
+    load_config,
+    resolve_append_only_patterns,
+    resolve_protected_memory_paths,
+    resolve_write_patterns,
+)
 from obsidian_mcp_opencode.errors import ConfigError
 
 TEST_API_KEY = "test-token-abcdefghijklmnopqrstuvwxyz-1234567890"
@@ -20,9 +36,16 @@ def clear_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     the developer's real ~/.config/obsidian-mcp-opencode/.env or project .env.
     """
 
-    for key in ["OBSIDIAN_VAULT_PATH", "OBSIDIAN_API_KEY", "OBSIDIAN_BASE_URL", "LOG_LEVEL"]:
+    for key in [
+        "OBSIDIAN_VAULT_PATH",
+        "OBSIDIAN_API_KEY",
+        "OBSIDIAN_BASE_URL",
+        "OBSIDIAN_WORKFLOW",
+        "OBSIDIAN_WRITE_PATTERNS",
+        "OBSIDIAN_APPEND_ONLY_PATTERNS",
+        "LOG_LEVEL",
+    ]:
         monkeypatch.delenv(key, raising=False)
-    # Redirect default env-file lookups to a guaranteed-missing location.
     nowhere = tmp_path / "no-such-config-dir" / ".env"
     monkeypatch.setattr(config_module, "DEFAULT_ENV_FILE", nowhere)
     monkeypatch.setattr(config_module, "PROJECT_ENV_FILE", nowhere)
@@ -115,6 +138,10 @@ def test_valid_config_loads_successfully(monkeypatch: pytest.MonkeyPatch, tmp_pa
     assert config.log_level == "INFO"
     assert config.read_only is False
     assert config.allow_move is False
+    assert config.workflow == DEFAULT_WORKFLOW
+    assert config.write_patterns == tuple(GENERIC_WRITE_PATTERNS)
+    assert config.append_only_patterns == tuple(GENERIC_APPEND_ONLY_PATTERNS)
+    assert config.protected_memory_paths == tuple(GENERIC_PROTECTED_MEMORY_PATHS)
 
 
 def test_env_file_argument_takes_precedence(
@@ -148,6 +175,8 @@ def test_config_allow_move_field_defaults_to_false(tmp_path: Path) -> None:
     )
 
     assert config.allow_move is False
+    assert config.workflow == WORKFLOW_FREYA
+    assert config.write_patterns == tuple(FREYA_WRITE_PATTERNS)
 
 
 def test_load_config_propagates_allow_move_true(
@@ -172,6 +201,71 @@ def test_load_config_defaults_allow_move_to_false(
     config = load_config()
 
     assert config.allow_move is False
+
+
+def test_load_config_uses_env_workflow_when_present(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setenv("OBSIDIAN_VAULT_PATH", str(tmp_path))
+    monkeypatch.setenv("OBSIDIAN_API_KEY", TEST_API_KEY)
+    monkeypatch.setenv("OBSIDIAN_WORKFLOW", "freya")
+
+    config = load_config()
+
+    assert config.workflow == WORKFLOW_FREYA
+    assert config.write_patterns == tuple(FREYA_WRITE_PATTERNS)
+    assert config.append_only_patterns == tuple(FREYA_APPEND_ONLY_PATTERNS)
+    assert config.protected_memory_paths == tuple(FREYA_PROTECTED_MEMORY_PATHS)
+
+
+def test_load_config_cli_workflow_overrides_env(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setenv("OBSIDIAN_VAULT_PATH", str(tmp_path))
+    monkeypatch.setenv("OBSIDIAN_API_KEY", TEST_API_KEY)
+    monkeypatch.setenv("OBSIDIAN_WORKFLOW", "freya")
+
+    config = load_config(workflow="generic")
+
+    assert config.workflow == WORKFLOW_GENERIC
+    assert config.write_patterns == tuple(GENERIC_WRITE_PATTERNS)
+
+
+def test_load_config_rejects_unsupported_workflow(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setenv("OBSIDIAN_VAULT_PATH", str(tmp_path))
+    monkeypatch.setenv("OBSIDIAN_API_KEY", TEST_API_KEY)
+
+    with pytest.raises(ConfigError, match="Unsupported workflow"):
+        load_config(workflow="weird")
+
+
+def test_load_config_parses_pattern_overrides(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setenv("OBSIDIAN_VAULT_PATH", str(tmp_path))
+    monkeypatch.setenv("OBSIDIAN_API_KEY", TEST_API_KEY)
+    monkeypatch.setenv("OBSIDIAN_WRITE_PATTERNS", "foo.md, bar/*.md")
+    monkeypatch.setenv("OBSIDIAN_APPEND_ONLY_PATTERNS", "LOGS.md, Journal/*.md")
+
+    config = load_config()
+
+    assert config.write_patterns == ("foo.md", "bar/*.md")
+    assert config.append_only_patterns == ("LOGS.md", "Journal/*.md")
+
+
+def test_resolve_helpers_return_mode_defaults() -> None:
+    assert resolve_write_patterns(WORKFLOW_GENERIC) == GENERIC_WRITE_PATTERNS
+    assert resolve_write_patterns(WORKFLOW_FREYA) == FREYA_WRITE_PATTERNS
+    assert resolve_append_only_patterns(WORKFLOW_GENERIC) == GENERIC_APPEND_ONLY_PATTERNS
+    assert resolve_append_only_patterns(WORKFLOW_FREYA) == FREYA_APPEND_ONLY_PATTERNS
+    assert resolve_protected_memory_paths(WORKFLOW_GENERIC) == GENERIC_PROTECTED_MEMORY_PATHS
+    assert resolve_protected_memory_paths(WORKFLOW_FREYA) == FREYA_PROTECTED_MEMORY_PATHS
 
 
 def test_api_key_never_appears_in_logs(

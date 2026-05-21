@@ -7,7 +7,12 @@ import httpx
 import pytest
 from pytest_httpx import HTTPXMock
 
-from obsidian_mcp_opencode.config import Config
+from obsidian_mcp_opencode.config import (
+    FREYA_APPEND_ONLY_PATTERNS,
+    FREYA_PROTECTED_MEMORY_PATHS,
+    FREYA_WRITE_PATTERNS,
+    Config,
+)
 from obsidian_mcp_opencode.errors import ErrorCode, MCPError
 from obsidian_mcp_opencode.obsidian_client import ObsidianClient
 
@@ -25,6 +30,9 @@ def config(tmp_path: Path) -> Config:
         log_level="INFO",
         read_only=False,
         allow_move=False,
+        write_patterns=tuple(FREYA_WRITE_PATTERNS),
+        append_only_patterns=tuple(FREYA_APPEND_ONLY_PATTERNS),
+        protected_memory_paths=tuple(FREYA_PROTECTED_MEMORY_PATHS),
     )
 
 

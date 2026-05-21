@@ -6,7 +6,12 @@ from datetime import datetime
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from obsidian_mcp_opencode.config import MISTAKE_LOG_FILENAME, TIMEZONE, Config
+from obsidian_mcp_opencode.config import (
+    MISTAKE_LOG_FILENAME,
+    TIMEZONE,
+    WORKFLOW_FREYA,
+    Config,
+)
 from obsidian_mcp_opencode.errors import (
     ErrorCode,
     MCPError,
@@ -133,6 +138,13 @@ def _parse_mistake_log(body: str) -> tuple[list[dict[str, str]], list[dict[str, 
 
 
 async def get_mistake_log(ctx: ToolContext) -> dict[str, Any]:
+    if ctx.config.workflow != WORKFLOW_FREYA:
+        return error_envelope(
+            ErrorCode.VALIDATION_ERROR,
+            "Mistake log is a Freya-workflow feature. Run server with --workflow freya to enable.",
+            {"workflow": ctx.config.workflow},
+        )
+
     try:
         body, _metadata = await ctx.client.get_file(MISTAKE_LOG_FILENAME)
     except MCPError as exc:
@@ -162,6 +174,13 @@ async def append_mistake_log(
     lesson: str,
     date: str = "",
 ) -> dict[str, Any]:
+    if ctx.config.workflow != WORKFLOW_FREYA:
+        return error_envelope(
+            ErrorCode.VALIDATION_ERROR,
+            "Mistake log is a Freya-workflow feature. Run server with --workflow freya to enable.",
+            {"workflow": ctx.config.workflow},
+        )
+
     fields = {
         "title": title,
         "context": context,

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 
 import pytest
 
@@ -18,8 +17,7 @@ from obsidian_mcp_opencode.server import (
 )
 from obsidian_mcp_opencode.tools import mistake_log, notes, projects
 
-TEST_API_KEY = "test-token-XYZ"
-CANONICAL_TOOL_NAMES = {
+CANONICAL_FREYA_TOOL_NAMES = {
     "read_note",
     "write_note",
     "append_note",
@@ -31,35 +29,53 @@ CANONICAL_TOOL_NAMES = {
     "search_projects",
     "bootstrap_project",
 }
-WRITE_TOOL_NAMES = {
+CANONICAL_GENERIC_TOOL_NAMES = {
+    "read_note",
+    "write_note",
+    "append_note",
+    "list_notes",
+    "search_vault",
+}
+FREYA_WRITE_TOOL_NAMES = {
     "write_note",
     "append_note",
     "append_mistake_log",
     "bootstrap_project",
 }
+GENERIC_WRITE_TOOL_NAMES = {
+    "write_note",
+    "append_note",
+}
 MOVE_TOOL_NAME = "move_note"
 
-@pytest.fixture
-def config(tmp_path: Path) -> Config:
-    return Config(
-        vault_path=tmp_path,
-        api_key=TEST_API_KEY,
-        base_url="http://127.0.0.1:27123",
-        log_level="INFO",
-        read_only=False,
-        allow_move=False,
-    )
+EXPECTED_GENERIC_REGISTRY_BASE = 5
+EXPECTED_GENERIC_REGISTRY_WITH_MOVE = 6
+EXPECTED_FREYA_REGISTRY_BASE = 10
+EXPECTED_FREYA_REGISTRY_WITH_MOVE = 11
+EXPECTED_FREYA_WRITE_TOOL_COUNT = 4
+EXPECTED_FREYA_READ_TOOL_COUNT = 6
+EXPECTED_GENERIC_WRITE_TOOL_COUNT = 2
+EXPECTED_GENERIC_READ_TOOL_COUNT = 3
 
 
 @pytest.fixture
-def read_only_config(tmp_path: Path) -> Config:
+def config(freya_config: Config) -> Config:
+    return freya_config
+
+
+@pytest.fixture
+def read_only_config(freya_config: Config) -> Config:
     return Config(
-        vault_path=tmp_path,
-        api_key=TEST_API_KEY,
-        base_url="http://127.0.0.1:27123",
-        log_level="INFO",
+        vault_path=freya_config.vault_path,
+        api_key=freya_config.api_key,
+        base_url=freya_config.base_url,
+        log_level=freya_config.log_level,
         read_only=True,
         allow_move=False,
+        workflow=freya_config.workflow,
+        write_patterns=freya_config.write_patterns,
+        append_only_patterns=freya_config.append_only_patterns,
+        protected_memory_paths=freya_config.protected_memory_paths,
     )
 
 
@@ -78,11 +94,6 @@ def _descriptor(name: str) -> ToolDescriptor:
     return next(item for item in TOOL_REGISTRY if item.name == name)
 
 
-EXPECTED_TOOL_COUNT = 10
-EXPECTED_WRITE_TOOL_COUNT = 4
-EXPECTED_READ_TOOL_COUNT = 6
-
-
 def _with_allow_move(config: Config, allow_move: bool) -> Config:
     return Config(
         vault_path=config.vault_path,
@@ -91,47 +102,101 @@ def _with_allow_move(config: Config, allow_move: bool) -> Config:
         log_level=config.log_level,
         read_only=config.read_only,
         allow_move=allow_move,
+        workflow=config.workflow,
+        write_patterns=config.write_patterns,
+        append_only_patterns=config.append_only_patterns,
+        protected_memory_paths=config.protected_memory_paths,
     )
 
 
-def test_build_tool_registry_without_config_returns_exactly_ten_descriptors() -> None:
+def test_build_tool_registry_without_config_returns_core_descriptors_only() -> None:
     registry = build_tool_registry()
 
-    assert len(registry) == EXPECTED_TOOL_COUNT
+    assert len(registry) == EXPECTED_GENERIC_REGISTRY_BASE
     assert all(isinstance(item, ToolDescriptor) for item in registry)
+    assert {item.name for item in registry} == CANONICAL_GENERIC_TOOL_NAMES
 
 
-def test_build_tool_registry_allow_move_false_returns_ten_descriptors(config: Config) -> None:
+def test_build_tool_registry_freya_allow_move_false_returns_ten_descriptors(
+    config: Config,
+) -> None:
     registry = build_tool_registry(_with_allow_move(config, False))
 
-    assert len(registry) == EXPECTED_TOOL_COUNT
+    assert len(registry) == EXPECTED_FREYA_REGISTRY_BASE
     assert all(isinstance(item, ToolDescriptor) for item in registry)
 
 
-def test_build_tool_registry_allow_move_true_returns_eleven_descriptors(config: Config) -> None:
+def test_build_tool_registry_freya_allow_move_true_returns_eleven_descriptors(
+    config: Config,
+) -> None:
     registry = build_tool_registry(_with_allow_move(config, True))
 
-    assert len(registry) == EXPECTED_TOOL_COUNT + 1
+    assert len(registry) == EXPECTED_FREYA_REGISTRY_WITH_MOVE
     move_descriptor = next(item for item in registry if item.name == MOVE_TOOL_NAME)
     assert move_descriptor.is_write is True
 
 
-def test_tool_names_are_unique_and_match_canonical_names() -> None:
-    registry = build_tool_registry()
+def test_build_tool_registry_generic_allow_move_false_returns_five_descriptors(
+    generic_config: Config,
+) -> None:
+    registry = build_tool_registry(generic_config)
+
+    assert len(registry) == EXPECTED_GENERIC_REGISTRY_BASE
+    assert {item.name for item in registry} == CANONICAL_GENERIC_TOOL_NAMES
+
+
+def test_build_tool_registry_generic_allow_move_true_returns_six_descriptors(
+    generic_config: Config,
+) -> None:
+    registry = build_tool_registry(_with_allow_move(generic_config, True))
+
+    assert len(registry) == EXPECTED_GENERIC_REGISTRY_WITH_MOVE
+    assert {item.name for item in registry} == (
+        CANONICAL_GENERIC_TOOL_NAMES | {MOVE_TOOL_NAME}
+    )
+
+
+def test_tool_names_are_unique_and_match_canonical_names_for_freya(
+    config: Config,
+) -> None:
+    registry = build_tool_registry(config)
     names = [item.name for item in registry]
 
     assert len(names) == len(set(names))
-    assert set(names) == CANONICAL_TOOL_NAMES
+    assert set(names) == CANONICAL_FREYA_TOOL_NAMES
 
 
-def test_write_flag_classification_matches_contract() -> None:
-    registry = build_tool_registry()
+def test_tool_names_are_unique_and_match_canonical_names_for_generic(
+    generic_config: Config,
+) -> None:
+    registry = build_tool_registry(generic_config)
+    names = [item.name for item in registry]
+
+    assert len(names) == len(set(names))
+    assert set(names) == CANONICAL_GENERIC_TOOL_NAMES
+
+
+def test_write_flag_classification_matches_freya_contract(
+    config: Config,
+) -> None:
+    registry = build_tool_registry(config)
     write_tools = {item.name for item in registry if item.is_write}
     read_tools = {item.name for item in registry if not item.is_write}
 
-    assert write_tools == WRITE_TOOL_NAMES
-    assert len(write_tools) == EXPECTED_WRITE_TOOL_COUNT
-    assert len(read_tools) == EXPECTED_READ_TOOL_COUNT
+    assert write_tools == FREYA_WRITE_TOOL_NAMES
+    assert len(write_tools) == EXPECTED_FREYA_WRITE_TOOL_COUNT
+    assert len(read_tools) == EXPECTED_FREYA_READ_TOOL_COUNT
+    assert write_tools.isdisjoint(read_tools)
+
+
+def test_write_flag_classification_matches_generic_contract(generic_config: Config) -> None:
+    registry = build_tool_registry(generic_config)
+    write_tools = {item.name for item in registry if item.is_write}
+    read_tools = {item.name for item in registry if not item.is_write}
+
+    assert write_tools == GENERIC_WRITE_TOOL_NAMES
+    assert len(write_tools) == EXPECTED_GENERIC_WRITE_TOOL_COUNT
+    assert len(read_tools) == EXPECTED_GENERIC_READ_TOOL_COUNT
     assert write_tools.isdisjoint(read_tools)
 
 
@@ -142,15 +207,17 @@ def test_write_flag_classification_includes_move_only_when_enabled(config: Confi
     disabled_write_tools = {item.name for item in disabled_registry if item.is_write}
     enabled_write_tools = {item.name for item in enabled_registry if item.is_write}
 
-    assert disabled_write_tools == WRITE_TOOL_NAMES
-    assert enabled_write_tools == WRITE_TOOL_NAMES | {MOVE_TOOL_NAME}
+    assert disabled_write_tools == FREYA_WRITE_TOOL_NAMES
+    assert enabled_write_tools == FREYA_WRITE_TOOL_NAMES | {MOVE_TOOL_NAME}
 
 
-def test_no_tool_descriptor_exposes_delete_name(config: Config) -> None:
+def test_no_tool_descriptor_exposes_delete_name(config: Config, generic_config: Config) -> None:
     registries = [
         build_tool_registry(),
-        build_tool_registry(_with_allow_move(config, False)),
+        build_tool_registry(config),
         build_tool_registry(_with_allow_move(config, True)),
+        build_tool_registry(generic_config),
+        build_tool_registry(_with_allow_move(generic_config, True)),
     ]
 
     for registry in registries:

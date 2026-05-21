@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Final
 from urllib.parse import urlparse
@@ -11,7 +11,21 @@ from dotenv import dotenv_values
 
 from .errors import ConfigError
 
-WRITE_PATTERNS: Final[list[str]] = [
+WORKFLOW_GENERIC: Final[str] = "generic"
+WORKFLOW_FREYA: Final[str] = "freya"
+SUPPORTED_WORKFLOWS: Final[frozenset[str]] = frozenset(
+    {WORKFLOW_GENERIC, WORKFLOW_FREYA}
+)
+DEFAULT_WORKFLOW: Final[str] = WORKFLOW_GENERIC
+
+GENERIC_WRITE_PATTERNS: Final[list[str]] = [
+    "**/*.md",
+    "*.md",
+]
+GENERIC_APPEND_ONLY_PATTERNS: Final[list[str]] = []
+GENERIC_PROTECTED_MEMORY_PATHS: Final[list[str]] = []
+
+FREYA_WRITE_PATTERNS: Final[list[str]] = [
     # Generic project docs
     "Projects/{slug}/PROJECT.md",
     "Projects/{slug}/LOGS.md",
@@ -46,16 +60,22 @@ WRITE_PATTERNS: Final[list[str]] = [
     "LOGS.md",
 ]
 
-APPEND_ONLY_PATTERNS: Final[list[str]] = [
+FREYA_APPEND_ONLY_PATTERNS: Final[list[str]] = [
     "Freya - Mistake Log.md",
     "LOGS.md",
     "Projects/*/LOGS.md",
     "Projects/*/BUILD_LOG.md",
 ]
 
-PROTECTED_MEMORY_PATHS: Final[list[str]] = [
+FREYA_PROTECTED_MEMORY_PATHS: Final[list[str]] = [
     "Projects/PIPELINE_INDEX.md",
 ]
+
+# Aliases preserved so external code/tests that import these still work; new code
+# should use the workflow-aware getters.
+WRITE_PATTERNS = FREYA_WRITE_PATTERNS
+APPEND_ONLY_PATTERNS = FREYA_APPEND_ONLY_PATTERNS
+PROTECTED_MEMORY_PATHS = FREYA_PROTECTED_MEMORY_PATHS
 
 MISTAKE_LOG_FILENAME: Final[str] = "Freya - Mistake Log.md"
 PIPELINE_INDEX_PATH: Final[str] = "Projects/PIPELINE_INDEX.md"
@@ -84,6 +104,38 @@ DEFAULT_ENV_FILE = DEFAULT_CONFIG_DIR / ".env"
 PROJECT_ENV_FILE = PROJECT_ROOT / ".env"
 
 
+def resolve_write_patterns(
+    workflow: str, override: list[str] | None = None
+) -> list[str]:
+    """Return active write patterns for the given workflow."""
+
+    if override is not None:
+        return override
+    if workflow == WORKFLOW_FREYA:
+        return FREYA_WRITE_PATTERNS
+    return GENERIC_WRITE_PATTERNS
+
+
+def resolve_append_only_patterns(
+    workflow: str, override: list[str] | None = None
+) -> list[str]:
+    """Return active append-only patterns for the given workflow."""
+
+    if override is not None:
+        return override
+    if workflow == WORKFLOW_FREYA:
+        return FREYA_APPEND_ONLY_PATTERNS
+    return GENERIC_APPEND_ONLY_PATTERNS
+
+
+def resolve_protected_memory_paths(workflow: str) -> list[str]:
+    """Return active protected memory paths for the given workflow."""
+
+    if workflow == WORKFLOW_FREYA:
+        return FREYA_PROTECTED_MEMORY_PATHS
+    return GENERIC_PROTECTED_MEMORY_PATHS
+
+
 @dataclass(frozen=True, slots=True)
 class Config:
     """Runtime configuration. Built once at startup, then frozen."""
@@ -94,6 +146,16 @@ class Config:
     log_level: str
     read_only: bool
     allow_move: bool
+    workflow: str = WORKFLOW_FREYA
+    write_patterns: tuple[str, ...] = field(
+        default_factory=lambda: tuple(FREYA_WRITE_PATTERNS)
+    )
+    append_only_patterns: tuple[str, ...] = field(
+        default_factory=lambda: tuple(FREYA_APPEND_ONLY_PATTERNS)
+    )
+    protected_memory_paths: tuple[str, ...] = field(
+        default_factory=lambda: tuple(FREYA_PROTECTED_MEMORY_PATHS)
+    )
 
 
 def _load_env_values(env_file: Path | None) -> dict[str, str]:
@@ -159,11 +221,20 @@ def _validate_base_url(base_url: str | None) -> str:
     return candidate.rstrip("/")
 
 
+def _parse_pattern_list(value: str | None) -> list[str] | None:
+    """Parse a comma-separated pattern list."""
+
+    if not value or not value.strip():
+        return None
+    return [pattern.strip() for pattern in value.split(",") if pattern.strip()]
+
+
 def load_config(
     *,
     env_file: Path | None = None,
     read_only: bool = False,
     allow_move: bool = False,
+    workflow: str | None = None,
 ) -> Config:
     """Load and validate runtime configuration."""
 
@@ -173,6 +244,26 @@ def load_config(
     base_url = _validate_base_url(values.get("OBSIDIAN_BASE_URL"))
     log_level = (values.get("LOG_LEVEL") or DEFAULT_LOG_LEVEL).upper()
 
+    resolved_workflow = (
+        workflow or values.get("OBSIDIAN_WORKFLOW", DEFAULT_WORKFLOW)
+    ).lower()
+    if resolved_workflow not in SUPPORTED_WORKFLOWS:
+        raise ConfigError(
+            f"Unsupported workflow '{resolved_workflow}'. Use 'generic' or 'freya'."
+        )
+
+    write_patterns_override = _parse_pattern_list(values.get("OBSIDIAN_WRITE_PATTERNS"))
+    append_only_override = _parse_pattern_list(
+        values.get("OBSIDIAN_APPEND_ONLY_PATTERNS")
+    )
+    write_patterns = tuple(
+        resolve_write_patterns(resolved_workflow, write_patterns_override)
+    )
+    append_only_patterns = tuple(
+        resolve_append_only_patterns(resolved_workflow, append_only_override)
+    )
+    protected_memory_paths = tuple(resolve_protected_memory_paths(resolved_workflow))
+
     return Config(
         vault_path=vault_path,
         api_key=api_key,
@@ -180,4 +271,8 @@ def load_config(
         log_level=log_level,
         read_only=READ_ONLY_MODE or read_only,
         allow_move=allow_move,
+        workflow=resolved_workflow,
+        write_patterns=write_patterns,
+        append_only_patterns=append_only_patterns,
+        protected_memory_paths=protected_memory_paths,
     )

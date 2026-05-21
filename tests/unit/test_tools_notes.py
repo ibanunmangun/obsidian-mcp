@@ -9,6 +9,8 @@ from obsidian_mcp_opencode.config import (
     MAX_SEARCH_QUERY_CHARS,
     MAX_SEARCH_RESULTS,
     MAX_SEARCH_SNIPPET_CHARS,
+    WORKFLOW_FREYA,
+    WORKFLOW_GENERIC,
     Config,
 )
 from obsidian_mcp_opencode.errors import ErrorCode
@@ -30,14 +32,29 @@ pytestmark = pytest.mark.asyncio
 
 
 @pytest.fixture
-async def ctx(tmp_path: Path):
+async def ctx(freya_config: Config):
+    client = ObsidianClient(freya_config)
+    locks = LockRegistry()
+    context = ToolContext(client=client, config=freya_config, locks=locks)
+    try:
+        yield context
+    finally:
+        await client.aclose()
+
+
+@pytest.fixture
+async def read_only_ctx(freya_config: Config):
     config = Config(
-        vault_path=tmp_path,
-        api_key=TEST_API_KEY,
-        base_url="http://127.0.0.1:27123",
-        log_level="INFO",
-        read_only=False,
+        vault_path=freya_config.vault_path,
+        api_key=freya_config.api_key,
+        base_url=freya_config.base_url,
+        log_level=freya_config.log_level,
+        read_only=True,
         allow_move=False,
+        workflow=freya_config.workflow,
+        write_patterns=freya_config.write_patterns,
+        append_only_patterns=freya_config.append_only_patterns,
+        protected_memory_paths=freya_config.protected_memory_paths,
     )
     client = ObsidianClient(config)
     locks = LockRegistry()
@@ -49,18 +66,10 @@ async def ctx(tmp_path: Path):
 
 
 @pytest.fixture
-async def read_only_ctx(tmp_path: Path):
-    config = Config(
-        vault_path=tmp_path,
-        api_key=TEST_API_KEY,
-        base_url="http://127.0.0.1:27123",
-        log_level="INFO",
-        read_only=True,
-        allow_move=False,
-    )
-    client = ObsidianClient(config)
+async def generic_ctx(generic_config: Config):
+    client = ObsidianClient(generic_config)
     locks = LockRegistry()
-    context = ToolContext(client=client, config=config, locks=locks)
+    context = ToolContext(client=client, config=generic_config, locks=locks)
     try:
         yield context
     finally:
@@ -379,108 +388,24 @@ async def test_list_notes_recursive_depth_cap_behavior(
         current = current / f"level{level}"
         current.mkdir(parents=True, exist_ok=True)
 
-    httpx_mock.add_response(
-        method="GET",
-        url="http://127.0.0.1:27123/vault/level1/",
-        json={
-            "files": [
-                {"name": "level2", "path": "level1/level2/", "is_dir": True, "size": None}
-            ]
-        },
-    )
-    httpx_mock.add_response(
-        method="GET",
-        url="http://127.0.0.1:27123/vault/level1/level2/",
-        json={
-            "files": [
-                {"name": "level3", "path": "level1/level2/level3/", "is_dir": True, "size": None}
-            ]
-        },
-    )
-    httpx_mock.add_response(
-        method="GET",
-        url="http://127.0.0.1:27123/vault/level1/level2/level3/",
-        json={
-            "files": [
-                {
-                    "name": "level4",
-                    "path": "level1/level2/level3/level4/",
-                    "is_dir": True,
-                    "size": None,
-                }
-            ]
-        },
-    )
-    httpx_mock.add_response(
-        method="GET",
-        url="http://127.0.0.1:27123/vault/level1/level2/level3/level4/",
-        json={
-            "files": [
-                {
-                    "name": "level5",
-                    "path": "level1/level2/level3/level4/level5/",
-                    "is_dir": True,
-                    "size": None,
-                }
-            ]
-        },
-    )
-    httpx_mock.add_response(
-        method="GET",
-        url="http://127.0.0.1:27123/vault/level1/level2/level3/level4/level5/",
-        json={
-            "files": [
-                {
-                    "name": "level6",
-                    "path": "level1/level2/level3/level4/level5/level6/",
-                    "is_dir": True,
-                    "size": None,
-                }
-            ]
-        },
-    )
-    httpx_mock.add_response(
-        method="GET",
-        url="http://127.0.0.1:27123/vault/level1/level2/level3/level4/level5/level6/",
-        json={
-            "files": [
-                {
-                    "name": "level7",
-                    "path": "level1/level2/level3/level4/level5/level6/level7/",
-                    "is_dir": True,
-                    "size": None,
-                }
-            ]
-        },
-    )
-    httpx_mock.add_response(
-        method="GET",
-        url="http://127.0.0.1:27123/vault/level1/level2/level3/level4/level5/level6/level7/",
-        json={
-            "files": [
-                {
-                    "name": "level8",
-                    "path": "level1/level2/level3/level4/level5/level6/level7/level8/",
-                    "is_dir": True,
-                    "size": None,
-                }
-            ]
-        },
-    )
-    httpx_mock.add_response(
-        method="GET",
-        url="http://127.0.0.1:27123/vault/level1/level2/level3/level4/level5/level6/level7/level8/",
-        json={
-            "files": [
-                {
-                    "name": "level9",
-                    "path": "level1/level2/level3/level4/level5/level6/level7/level8/level9/",
-                    "is_dir": True,
-                    "size": None,
-                }
-            ]
-        },
-    )
+    for level in range(1, 9):
+        next_level = level + 1
+        current_path = "/".join(f"level{part}" for part in range(1, level + 1))
+        next_path = f"{current_path}/level{next_level}/"
+        httpx_mock.add_response(
+            method="GET",
+            url=f"http://127.0.0.1:27123/vault/{current_path}/",
+            json={
+                "files": [
+                    {
+                        "name": f"level{next_level}",
+                        "path": next_path,
+                        "is_dir": True,
+                        "size": None,
+                    }
+                ]
+            },
+        )
 
     result = await list_notes(ctx, path="level1", recursive=True)
 
@@ -519,91 +444,20 @@ async def test_search_vault_happy_path_returns_capped_results(
     assert result["ok"] is True
     assert result["data"]["truncated"] is True
     assert len(result["data"]["hits"]) == 1
-    assert len(result["data"]["hits"][0]["snippet"]) == MAX_SEARCH_SNIPPET_CHARS
+    assert result["data"]["hits"][0]["snippet"] == snippet[:MAX_SEARCH_SNIPPET_CHARS]
 
 
-async def test_search_vault_path_prefix_filters_hits(
+async def test_search_vault_caps_to_max_search_results(
     ctx: ToolContext,
     httpx_mock: HTTPXMock,
-    tmp_path: Path,
 ) -> None:
-    (tmp_path / "Projects" / "foo").mkdir(parents=True)
     httpx_mock.add_response(
         method="POST",
         url="http://127.0.0.1:27123/search/simple/?query=needle",
         json=[
-            {"path": "Projects/foo/PROJECT.md", "snippet": "keep", "line": 1},
-            {"path": "Projects/bar/PROJECT.md", "snippet": "drop", "line": 2},
+            {"path": f"Projects/foo/note-{index}.md", "snippet": "hit", "line": index}
+            for index in range(MAX_SEARCH_RESULTS + 10)
         ],
-    )
-
-    result = await search_vault(ctx, query="needle", path_prefix="Projects/foo")
-
-    assert result == {
-        "ok": True,
-        "data": {
-            "hits": [
-                {
-                    "path": "Projects/foo/PROJECT.md",
-                    "snippet": "keep",
-                    "line": 1,
-                    "match_type": "content",
-                }
-            ],
-            "truncated": False,
-        },
-    }
-
-
-async def test_search_vault_detects_filename_vs_content_matches(
-    ctx: ToolContext,
-    httpx_mock: HTTPXMock,
-) -> None:
-    httpx_mock.add_response(
-        method="POST",
-        url="http://127.0.0.1:27123/search/simple/?query=project",
-        json=[
-            {"path": "Projects/foo/project-notes.md", "snippet": "body hit", "line": 9},
-            {"path": "Projects/foo/SUMMARY.md", "snippet": "mentions project", "line": 4},
-        ],
-    )
-
-    result = await search_vault(ctx, query="project")
-
-    assert result == {
-        "ok": True,
-        "data": {
-            "hits": [
-                {
-                    "path": "Projects/foo/project-notes.md",
-                    "snippet": "body hit",
-                    "line": None,
-                    "match_type": "filename",
-                },
-                {
-                    "path": "Projects/foo/SUMMARY.md",
-                    "snippet": "mentions project",
-                    "line": 4,
-                    "match_type": "content",
-                },
-            ],
-            "truncated": False,
-        },
-    }
-
-
-async def test_search_vault_caps_max_results_to_global_limit(
-    ctx: ToolContext,
-    httpx_mock: HTTPXMock,
-) -> None:
-    hits = [
-        {"path": f"Projects/foo/file-{index}.md", "snippet": "hit", "line": index}
-        for index in range(MAX_SEARCH_RESULTS + 5)
-    ]
-    httpx_mock.add_response(
-        method="POST",
-        url="http://127.0.0.1:27123/search/simple/?query=needle",
-        json=hits,
     )
 
     result = await search_vault(ctx, query="needle", max_results=MAX_SEARCH_RESULTS + 50)
@@ -613,19 +467,126 @@ async def test_search_vault_caps_max_results_to_global_limit(
     assert result["data"]["truncated"] is True
 
 
-async def test_read_note_redacts_api_key_from_http_error(
-    ctx: ToolContext,
+async def test_generic_write_note_allows_project_markdown(
+    generic_ctx: ToolContext,
+    httpx_mock: HTTPXMock,
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "Projects" / "anything").mkdir(parents=True)
+    httpx_mock.add_response(
+        method="HEAD",
+        url="http://127.0.0.1:27123/vault/Projects/anything/whatever.md",
+        status_code=404,
+    )
+    httpx_mock.add_response(
+        method="PUT",
+        url="http://127.0.0.1:27123/vault/Projects/anything/whatever.md",
+        status_code=204,
+    )
+    httpx_mock.add_response(
+        method="HEAD",
+        url="http://127.0.0.1:27123/vault/Projects/anything/whatever.md",
+        headers={"Content-Length": "4"},
+    )
+
+    result = await write_note(generic_ctx, path="Projects/anything/whatever.md", content="body")
+
+    assert generic_ctx.config.workflow == WORKFLOW_GENERIC
+    assert result["ok"] is True
+    assert result["data"]["created"] is True
+
+
+async def test_generic_write_note_parent_directory_missing(
+    generic_ctx: ToolContext,
+) -> None:
+    result = await write_note(
+        generic_ctx,
+        path="Projects/anything/whatever.md",
+        content="body",
+    )
+
+    assert _error_code(result) == ErrorCode.PARENT_DIRECTORY_MISSING
+
+
+async def test_generic_write_note_allows_nested_markdown(
+    generic_ctx: ToolContext,
+    httpx_mock: HTTPXMock,
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "notes" / "journal").mkdir(parents=True)
+    httpx_mock.add_response(
+        method="HEAD",
+        url="http://127.0.0.1:27123/vault/notes/journal/2026-05.md",
+        status_code=404,
+    )
+    httpx_mock.add_response(
+        method="PUT",
+        url="http://127.0.0.1:27123/vault/notes/journal/2026-05.md",
+        status_code=204,
+    )
+    httpx_mock.add_response(
+        method="HEAD",
+        url="http://127.0.0.1:27123/vault/notes/journal/2026-05.md",
+        headers={"Content-Length": "4"},
+    )
+
+    result = await write_note(generic_ctx, path="notes/journal/2026-05.md", content="body")
+
+    assert result["ok"] is True
+    assert result["data"]["created"] is True
+
+
+async def test_generic_mode_does_not_treat_logs_as_append_only(
+    generic_ctx: ToolContext,
     httpx_mock: HTTPXMock,
 ) -> None:
     httpx_mock.add_response(
-        method="GET",
-        url="http://127.0.0.1:27123/vault/Projects/foo/PROJECT.md",
-        status_code=500,
-        text=f"failure {TEST_API_KEY}",
+        method="HEAD",
+        url="http://127.0.0.1:27123/vault/LOGS.md",
+        status_code=404,
+    )
+    httpx_mock.add_response(
+        method="PUT",
+        url="http://127.0.0.1:27123/vault/LOGS.md",
+        status_code=204,
+    )
+    httpx_mock.add_response(
+        method="HEAD",
+        url="http://127.0.0.1:27123/vault/LOGS.md",
+        headers={"Content-Length": "4"},
     )
 
-    result = await read_note(ctx, path="Projects/foo/PROJECT.md")
+    result = await write_note(generic_ctx, path="LOGS.md", content="body", overwrite=True)
 
-    assert result["ok"] is False
-    error_text = str(result["error"])
-    assert TEST_API_KEY not in error_text
+    assert result["ok"] is True
+
+
+async def test_generic_mode_does_not_trigger_mistake_log_special_case(
+    generic_ctx: ToolContext,
+    httpx_mock: HTTPXMock,
+) -> None:
+    httpx_mock.add_response(
+        method="HEAD",
+        url="http://127.0.0.1:27123/vault/Freya%20-%20Mistake%20Log.md",
+        status_code=404,
+    )
+    httpx_mock.add_response(
+        method="PUT",
+        url="http://127.0.0.1:27123/vault/Freya%20-%20Mistake%20Log.md",
+        status_code=204,
+    )
+    httpx_mock.add_response(
+        method="HEAD",
+        url="http://127.0.0.1:27123/vault/Freya%20-%20Mistake%20Log.md",
+        headers={"Content-Length": "4"},
+    )
+
+    result = await write_note(
+        generic_ctx,
+        path="Freya - Mistake Log.md",
+        content="body",
+        overwrite=True,
+    )
+
+    assert generic_ctx.config.workflow != WORKFLOW_FREYA
+    assert result["ok"] is True

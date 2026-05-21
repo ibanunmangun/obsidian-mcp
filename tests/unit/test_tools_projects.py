@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from pathlib import Path
-
 import httpx
 import pytest
 from pytest_httpx import HTTPXMock
@@ -10,6 +8,7 @@ from obsidian_mcp_opencode.config import (
     MAX_SEARCH_QUERY_CHARS,
     MAX_SEARCH_RESULTS,
     MAX_SEARCH_SNIPPET_CHARS,
+    WORKFLOW_GENERIC,
     Config,
 )
 from obsidian_mcp_opencode.errors import ErrorCode
@@ -22,24 +21,21 @@ from obsidian_mcp_opencode.tools.projects import (
     search_projects,
 )
 
-TEST_API_KEY = "token-abcdefghijklmnopqrstuvwxyz-1234567890"
-
 pytestmark = pytest.mark.asyncio
 
 
 @pytest.fixture
-def ctx(tmp_path: Path) -> ToolContext:
-    config = Config(
-        vault_path=tmp_path,
-        api_key=TEST_API_KEY,
-        base_url="http://127.0.0.1:27123",
-        log_level="INFO",
-        read_only=False,
-        allow_move=False,
-    )
-    client = ObsidianClient(config)
+def ctx(freya_config: Config) -> ToolContext:
+    client = ObsidianClient(freya_config)
     locks = LockRegistry()
-    return ToolContext(client=client, config=config, locks=locks)
+    return ToolContext(client=client, config=freya_config, locks=locks)
+
+
+@pytest.fixture
+def generic_ctx(generic_config: Config) -> ToolContext:
+    client = ObsidianClient(generic_config)
+    locks = LockRegistry()
+    return ToolContext(client=client, config=generic_config, locks=locks)
 
 
 async def test_get_pipeline_index_missing_returns_exists_false(ctx: ToolContext) -> None:
@@ -82,13 +78,22 @@ async def test_get_pipeline_index_api_unreachable_propagates(
 async def test_get_pipeline_index_redacts_token_on_http_error(
     ctx: ToolContext, httpx_mock: HTTPXMock
 ) -> None:
-    httpx_mock.add_response(status_code=500, text=f"failure {TEST_API_KEY}")
+    httpx_mock.add_response(status_code=500, text=f"failure {ctx.config.api_key}")
 
     result = await get_pipeline_index(ctx)
 
     await ctx.client.aclose()
     assert result["ok"] is False
-    assert TEST_API_KEY not in str(result)
+    assert ctx.config.api_key not in str(result)
+
+
+async def test_get_pipeline_index_generic_workflow_rejected(generic_ctx: ToolContext) -> None:
+    result = await get_pipeline_index(generic_ctx)
+
+    await generic_ctx.client.aclose()
+    assert result["ok"] is False
+    assert result["error"]["code"] == ErrorCode.VALIDATION_ERROR
+    assert result["error"]["details"]["workflow"] == WORKFLOW_GENERIC
 
 
 async def test_search_projects_rejects_empty_query(ctx: ToolContext) -> None:
@@ -168,6 +173,15 @@ async def test_search_projects_caps_max_results_and_sets_truncated(ctx: ToolCont
     assert result["data"]["truncated"] is True
 
 
+async def test_search_projects_generic_workflow_rejected(generic_ctx: ToolContext) -> None:
+    result = await search_projects(generic_ctx, query="project")
+
+    await generic_ctx.client.aclose()
+    assert result["ok"] is False
+    assert result["error"]["code"] == ErrorCode.VALIDATION_ERROR
+    assert result["error"]["details"]["workflow"] == WORKFLOW_GENERIC
+
+
 async def test_bootstrap_project_rejects_read_only(ctx: ToolContext) -> None:
     readonly_ctx = ToolContext(
         client=ctx.client,
@@ -178,6 +192,10 @@ async def test_bootstrap_project_rejects_read_only(ctx: ToolContext) -> None:
             log_level=ctx.config.log_level,
             read_only=True,
             allow_move=False,
+            workflow=ctx.config.workflow,
+            write_patterns=ctx.config.write_patterns,
+            append_only_patterns=ctx.config.append_only_patterns,
+            protected_memory_paths=ctx.config.protected_memory_paths,
         ),
         locks=ctx.locks,
     )
@@ -343,3 +361,12 @@ async def test_bootstrap_project_fails_when_post_write_verification_fails(ctx: T
     assert result["ok"] is False
     assert result["error"]["code"] == ErrorCode.WRITE_VERIFICATION_FAILED
     assert result["error"]["details"]["path"] == "Projects/foo/PROJECT.md"
+
+
+async def test_bootstrap_project_generic_workflow_rejected(generic_ctx: ToolContext) -> None:
+    result = await bootstrap_project(generic_ctx, slug="foo")
+
+    await generic_ctx.client.aclose()
+    assert result["ok"] is False
+    assert result["error"]["code"] == ErrorCode.VALIDATION_ERROR
+    assert result["error"]["details"]["workflow"] == WORKFLOW_GENERIC

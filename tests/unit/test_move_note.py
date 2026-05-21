@@ -10,21 +10,23 @@ from obsidian_mcp_opencode.locks import LockRegistry
 from obsidian_mcp_opencode.obsidian_client import ObsidianClient
 from obsidian_mcp_opencode.tools.notes import ToolContext, move_note
 
-TEST_API_KEY = "test-token-abcdefghijklmnopqrstuvwxyz-1234567890"
-
 pytestmark = pytest.mark.asyncio
 DELETE_VERIFICATION_SOURCE_STAT_CALLS = 2
 
 
 @pytest.fixture
-async def ctx(tmp_path: Path):
+async def ctx(freya_config: Config):
     config = Config(
-        vault_path=tmp_path,
-        api_key=TEST_API_KEY,
-        base_url="http://127.0.0.1:27123",
-        log_level="INFO",
+        vault_path=freya_config.vault_path,
+        api_key=freya_config.api_key,
+        base_url=freya_config.base_url,
+        log_level=freya_config.log_level,
         read_only=False,
         allow_move=True,
+        workflow=freya_config.workflow,
+        write_patterns=freya_config.write_patterns,
+        append_only_patterns=freya_config.append_only_patterns,
+        protected_memory_paths=freya_config.protected_memory_paths,
     )
     client = ObsidianClient(config)
     locks = LockRegistry()
@@ -36,14 +38,18 @@ async def ctx(tmp_path: Path):
 
 
 @pytest.fixture
-async def read_only_ctx(tmp_path: Path):
+async def read_only_ctx(freya_config: Config):
     config = Config(
-        vault_path=tmp_path,
-        api_key=TEST_API_KEY,
-        base_url="http://127.0.0.1:27123",
-        log_level="INFO",
+        vault_path=freya_config.vault_path,
+        api_key=freya_config.api_key,
+        base_url=freya_config.base_url,
+        log_level=freya_config.log_level,
         read_only=True,
         allow_move=True,
+        workflow=freya_config.workflow,
+        write_patterns=freya_config.write_patterns,
+        append_only_patterns=freya_config.append_only_patterns,
+        protected_memory_paths=freya_config.protected_memory_paths,
     )
     client = ObsidianClient(config)
     locks = LockRegistry()
