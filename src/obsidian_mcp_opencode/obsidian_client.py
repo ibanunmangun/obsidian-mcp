@@ -86,8 +86,12 @@ class ObsidianClient:
         operation: str | None = None,
     ) -> httpx.Response:
         operation_name = operation or method.lower()
+        kwargs: dict[str, Any] = {}
+        if content is not None:
+            kwargs["content"] = content.encode("utf-8")
+            kwargs["headers"] = {"Content-Type": "text/markdown; charset=utf-8"}
         try:
-            response = await self._client.request(method, url, content=content)
+            response = await self._client.request(method, url, **kwargs)
         except (httpx.ConnectError, httpx.ConnectTimeout, httpx.ReadTimeout) as exc:
             raise self._map_http_error(operation_name, url, exc=exc) from exc
 
